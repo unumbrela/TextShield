@@ -27,7 +27,7 @@ python resize_image_dir.py --input [your input image dir] --output [your output 
 
 3. Run model start code
 ```
-CUDA_VISIBLE_DEVICES=0 swift infer --model [your downloaded textshield model dir] --stream true --max_new_tokens 4096
+CUDA_VISIBLE_DEVICES=0 swift infer --model [your downloaded textshield model dir] --stream true --max_new_tokens 4096 --model_type qwen2_5_vl
 ```
 4. Input the prompt and image path
 ```
@@ -54,7 +54,7 @@ python convert_image_dir_to_json.py --input [your image dataset dir]
 Inference with the generated datase json file
 
 ```
-CUDA_VISIBLE_DEVICES=0 swift infer --model [your downloaded textshield model dir] --val_dataset [your dataset json file] --max_new_tokens 4096
+CUDA_VISIBLE_DEVICES=0 swift infer --model [your downloaded textshield model dir] --val_dataset [your dataset json file] --max_new_tokens 4096 --model_type qwen2_5_vl
 ```
 
 
