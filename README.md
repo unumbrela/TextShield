@@ -10,7 +10,7 @@
 ```
 Python3.10
 
-pip install ms-swift transformers qwen-vl-utils[decord]==0.0.8
+pip install transformers==4.56.0  peft==0.18.1 ms-swift==3.5.0 qwen-vl-utils[decord]==0.0.8
 
 cp orm.py [your original ms-swift orm file, e.g. /usr/local/lib/python3.10/dist-packages/swift/plugin/orm.py]
 ```
@@ -19,9 +19,11 @@ cp orm.py [your original ms-swift orm file, e.g. /usr/local/lib/python3.10/dist-
 ### Model Inference 
 
 1. All input images should be resized to ensure that their heights and widths are times of 28.
+
 ```
 python resize_image_dir.py --input [your input image dir] --output [your output image dir]
 ```
+
 
 2. Download the fine-tuned model at [Baidu Cloud](https://pan.baidu.com/s/1sAJ0SkJbCW0MKW-K30tEAg?pwd=text)
 
@@ -29,7 +31,10 @@ python resize_image_dir.py --input [your input image dir] --output [your output 
 ```
 CUDA_VISIBLE_DEVICES=0 swift infer --model [your downloaded textshield model dir] --stream true --max_new_tokens 4096 --model_type qwen2_5_vl
 ```
-4. Input the prompt and image path
+4. Input the prompt and image path.
+   
+   [Here](https://github.com/qcf-568/TextShield/blob/main/test_imgs.tar) are some processed images for testing the model pipeline.
+   
 ```
 <image> Is this image real, entirely generated, or tampered? If it has been tampered, what method was used, and what are the content and bounding box coordinates of the tampered text? Output the thinking process in <think> </think> and \n final answer (number) in <answer> </answer> tags. \n Here is an example answer for a real image: <answer> This image is real. </answer> Here is an example answer for an entirely generated image: <answer> This image is entirely generated. </answer> Here is an example answer for a locally tampered image: <answer> This image is tampered. It was tampered by copy-paste. The tampered text reads "small" in the text line "a small yellow flower", and it is located at ... </answer>
 ```
