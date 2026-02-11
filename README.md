@@ -1,6 +1,7 @@
 # TextShield
 
 [AAAI2026] TextShield-R1: Reinforced Reasoning for Tampered Text Detection
+[paper](https://github.com/qcf-568/TextShield/blob/main/TextShield_R1_paper.pdf)
 
 <img width="2234" height="1232" alt="image" src="https://github.com/user-attachments/assets/5eb810cd-0869-4811-b298-dbf82395a519" />
 
