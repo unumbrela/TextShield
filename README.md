@@ -165,7 +165,7 @@ The final output dir is the TextShield-R1 model and can be used as the input mod
 
 ### Text Forensics Reasoning (TFR) Benchmark
 
-The proposed TFR benchmark was uploaded to [Kaggle](https://pan.baidu.com/s/1V11tO2XSd1GELC0lDsliJQ?pwd=TFRB) and [BaiduCloud](https://pan.baidu.com/s/1V11tO2XSd1GELC0lDsliJQ?pwd=TFRB).
+The proposed TFR benchmark was uploaded to [HuggingFace](https://huggingface.co/qcf568/TFR/tree/main) and [BaiduCloud](https://pan.baidu.com/s/1V11tO2XSd1GELC0lDsliJQ?pwd=TFRB).
 
 <font size=10>Researchers are welcome 😃 to apply for this dataset by sending an email to  202221012612@mail.scut.edu.cn (with institution email address) and introducing:</font><br/>
 1. Who you are and your institution.
