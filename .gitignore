@@ -1,0 +1,29 @@
+# Local model weights and archives
+/textshield/
+/textshield.tar
+
+# Local datasets and generated outputs
+/dataset/
+/outputs/
+/tmp/
+
+# Extracted sample images
+/test_imgs/
+/test_imgs_28/
+
+# Logs and local notes
+/运行日志
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Environment and editor files
+.venv/
+venv/
+.env
+.DS_Store
