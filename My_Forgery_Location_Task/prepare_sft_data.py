@@ -23,6 +23,7 @@
 
 import argparse
 import json
+import math
 import os
 import re
 
@@ -50,6 +51,64 @@ BBOX_PAT = re.compile(r'\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]')
 # Chinese and English quotes
 QUOTE_PAT = re.compile(r'[\u201c"](.*?)[\u201d"]')
 
+# Qwen2.5-VL processor 默认参数
+QWEN_MAX_PIXELS = 1_003_520   # 1280 * 28 * 28
+QWEN_MIN_PIXELS = 3_136       # 28 * 28 * 4
+
+
+def smart_resize(height, width, factor=28,
+                 min_pixels=QWEN_MIN_PIXELS, max_pixels=QWEN_MAX_PIXELS):
+    """复制 Qwen2.5-VL processor 的 smart_resize 逻辑,
+    返回 processor 实际将图片缩放到的 (new_h, new_w)。"""
+    h_bar = max(factor, round(height / factor) * factor)
+    w_bar = max(factor, round(width / factor) * factor)
+    if h_bar * w_bar > max_pixels:
+        beta = math.sqrt((height * width) / max_pixels)
+        h_bar = math.floor(height / beta / factor) * factor
+        w_bar = math.floor(width / beta / factor) * factor
+    elif h_bar * w_bar < min_pixels:
+        beta = math.sqrt(min_pixels / (height * width))
+        h_bar = math.ceil(height * beta / factor) * factor
+        w_bar = math.ceil(width * beta / factor) * factor
+    return max(factor, h_bar), max(factor, w_bar)
+
+
+def scale_bbox_for_processor(bbox_str, orig_w, orig_h, img28_w, img28_h):
+    """将原始坐标空间的 bbox 字符串缩放到 processor 实际看到的坐标空间。
+
+    训练时, processor 会用 smart_resize 将 img28 缩放到 (model_h, model_w),
+    因此训练标签中的坐标也应该在 (model_h, model_w) 空间, 这样模型才能
+    学到准确的坐标映射。
+
+    Args:
+        bbox_str: "[x1, y1, x2, y2]" 格式的字符串, 坐标在 orig 空间
+        orig_w, orig_h: 原始图片尺寸
+        img28_w, img28_h: pad/resize 到 28 倍数后的图片尺寸
+    Returns:
+        缩放后的 "[x1, y1, x2, y2]" 字符串, 坐标在 model 空间
+    """
+    model_h, model_w = smart_resize(img28_h, img28_w)
+
+    # 如果 processor 不会缩放, 直接返回原始坐标
+    if model_h == img28_h and model_w == img28_w:
+        return bbox_str
+
+    # 坐标从 orig 空间 → model 空间
+    # orig → img28 的映射: pad 模式下坐标不变, resize 模式下需要缩放
+    # img28 → model 的映射: 按 processor 缩放比
+    scale_x = model_w / orig_w
+    scale_y = model_h / orig_h
+
+    def _scale_match(m):
+        x1, y1, x2, y2 = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+        nx1 = int(round(x1 * scale_x))
+        ny1 = int(round(y1 * scale_y))
+        nx2 = int(round(x2 * scale_x))
+        ny2 = int(round(y2 * scale_y))
+        return f'[{nx1}, {ny1}, {nx2}, {ny2}]'
+
+    return BBOX_PAT.sub(_scale_match, bbox_str)
+
 
 def find_image_28(stem, img28_dir):
     """在 resize 后的目录中找到对应图片"""
@@ -69,12 +128,13 @@ def find_original_image(stem, img_dir):
     return None
 
 
-def build_tampered_answer(caption, bboxes_from_mask):
+def build_tampered_answer(caption, bboxes_from_mask, coord_scale_fn=None):
     """
     为伪造图片构建 <think>...</think><answer>...</answer> 格式的标签。
 
     caption: 中文描述 (含 bbox 和推理过程)
     bboxes_from_mask: 从 mask 提取的 bbox 列表 [[x1,y1,x2,y2], ...]
+    coord_scale_fn: 可选, 将 bbox 字符串缩放到 model 空间的函数
     """
     # 用完整 caption 作为 think 内容
     think = caption.strip()
@@ -96,6 +156,10 @@ def build_tampered_answer(caption, bboxes_from_mask):
         bbox_text = ', '.join(bbox_strs)
     else:
         bbox_text = ''
+
+    # 将 bbox 坐标缩放到 processor 实际看到的空间 (如果需要)
+    if coord_scale_fn and bbox_text:
+        bbox_text = coord_scale_fn(bbox_text)
 
     # 从 caption 提取引号内的篡改文本
     quotes = QUOTE_PAT.findall(caption)
@@ -148,6 +212,9 @@ def main():
     parser.add_argument('--white_image_dir_28', default=None,
                         help='White resize后的图片目录, 不指定则使用原图')
     parser.add_argument('--output', default='sft_train.jsonl', help='输出 jsonl 路径')
+    parser.add_argument('--scale_coords', action='store_true',
+                        help='将 bbox 坐标缩放到 processor 实际看到的空间 '
+                             '(修复大图训练时坐标偏移问题)')
     args = parser.parse_args()
 
     train_dir = os.path.abspath(args.train_dir)
@@ -195,8 +262,18 @@ def main():
         mask_path = os.path.join(black_mask_dir, stem + '.png')
         bboxes_from_mask = mask_to_bboxes(mask_path) if os.path.exists(mask_path) else []
 
+        # 坐标缩放函数 (如果启用)
+        coord_scale_fn = None
+        if args.scale_coords:
+            # 获取原始图片尺寸 (用于计算缩放比)
+            orig_img_path = find_original_image(stem, black_img_dir)
+            if orig_img_path:
+                ow, oh = imagesize.get(orig_img_path)
+                coord_scale_fn = lambda s, ow=ow, oh=oh, w=w, h=h: \
+                    scale_bbox_for_processor(s, ow, oh, w, h)
+
         # 构建标签
-        assistant_content = build_tampered_answer(caption, bboxes_from_mask)
+        assistant_content = build_tampered_answer(caption, bboxes_from_mask, coord_scale_fn)
 
         samples.append({
             'messages': [
@@ -257,6 +334,8 @@ def main():
     print(f'\nTotal: {len(samples)} samples written to {args.output}')
     print(f'  Black (tampered): {n_tampered}')
     print(f'  White (real): {n_real}')
+    if args.scale_coords:
+        print(f'  Coordinate scaling: ENABLED (bbox coords scaled to processor-seen space)')
 
 
 if __name__ == '__main__':

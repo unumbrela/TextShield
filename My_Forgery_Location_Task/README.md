@@ -223,8 +223,6 @@ SFin=0.45×SDet+0.25×SLoc+0.3×SExpSFin=0.45×SDet+0.25×SLoc+0.3×SExp
   python inference/infer.py --input My_Forgery_Location_Task/dataset/train/Black/Image/000a4d9158a34f238fd06b1effcdf53e.jpg --output_dir test_01/
 
 
-
-
   # ── 文件夹推理 (原始模型) ──
   python inference/infer.py --input path/to/image_dir/
 
