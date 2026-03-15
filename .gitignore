@@ -2,8 +2,15 @@
 /textshield/
 /textshield.tar
 
+# Original project data (large)
+/data/
+/ocr_info.zip
+
 # Local datasets and generated outputs
-/dataset/
+/My_Forgery_Location_Task/dataset/
+/My_Forgery_Location_Task/data.zip
+/My_Forgery_Location_Task/output_finetuned/
+/My_Forgery_Location_Task/sft_train_v2.jsonl
 /outputs/
 /tmp/
 

@@ -102,30 +102,154 @@ def mask_file_to_rle(mask_path: str) -> str:
 
 SFin=0.45×SDet+0.25×SLoc+0.3×SExpSFin=0.45×SDet+0.25×SLoc+0.3×SExp
 
- cd /home/zihao/code/FakeShield
+---
 
- **# 第1步：准备数据**
+## 运行流程
 
- python My_Forgery_Location_Task/prepare_dte_fdm_data.py
+所有命令在 `My_Forgery_Location_Task/` 目录下执行：
 
- python My_Forgery_Location_Task/prepare_mflm_data.py
+  cd My_Forgery_Location_Task
 
- **# 第2步：微调DTE-FDM**
+  # 1. 小票数据增强 (每张生成 4 个不同变体)
+  python augment_receipts.py \
+    --receipt_dir dataset/train/Black/receipt_of_train_black \
+    --image_dir dataset/train/Black/Image \
+    --caption_dir dataset/train/Black/Caption \
+    --mask_dir dataset/train/Black/Mask \
+    --num_aug 4
 
- bash My_Forgery_Location_Task/finetune_dte_fdm.sh
+  python augment_receipts.py \
+    --receipt_dir dataset/train/White/receipt_of_train_white \
+    --image_dir dataset/train/White/Image \
+    --caption_dir dataset/train/White/Caption \
+    --num_aug 4
 
- **# 第3步：合并DTE-FDM LoRA**
+  # 2. Padding 所有训练图片 (含增强后的)
+  python pad_image_dir.py --input dataset/train/Black/Image --output dataset/train/Black/Image_28
+  python pad_image_dir.py --input dataset/train/White/Image --output dataset/train/White/Image_28
 
- PYTHONPATH=./DTE-FDM:$PYTHONPATH python My_Forgery_Location_Task/merge_dte_fdm_lora.py
+  # 3. 生成 SFT 训练数据
+  python prepare_sft_data.py \
+    --train_dir dataset/train \
+    --image_dir_28 dataset/train/Black/Image_28 \
+    --white_image_dir_28 dataset/train/White/Image_28 \
+    --output sft_train_v2.jsonl
 
- **# 第4步：微调MFLM**
+  # 4. SFT 微调
 
- bash My_Forgery_Location_Task/finetune_mflm.sh
+  本地单卡运行，修正后的命令：
 
- **# 第5步：转换MFLM checkpoint**
+  CUDA_VISIBLE_DEVICES=0 swift sft \
+    --model ../textshield \
+    --template qwen2_5_vl \
+    --dataset sft_train_v2.jsonl \
+    --split_dataset_ratio 0.0001 \
+    --tuner_type lora \
+    --torch_dtype bfloat16 \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 1 \
+    --learning_rate 2e-4 \
+    --lora_rank 32 \
+    --lora_alpha 64 \
+    --target_modules all-linear \
+    --freeze_vit False \
+    --freeze_aligner False \
+    --gradient_accumulation_steps 4 \
+    --max_length 4096 \
+    --output_dir output_sft \
+    --warmup_ratio 0.03 \
+    --logging_steps 10
 
- python My_Forgery_Location_Task/convert_mflm_ckpt.py
+  关键改动：
+  - 加了 --template qwen2_5_vl
+  - --train_type → --tuner_type
+  - 去掉 NPROC_PER_NODE=8 和 --deepspeed zero2（单卡不需要）
+  - batch_size 4 → 1，用 gradient_accumulation_steps 4 补偿（本地显存可能不够）
 
- **# 第6步：推理**
+  服务器上 96G 显存的命令（多卡）：
 
- bash My_Forgery_Location_Task/run_pipeline_finetuned.sh
+  CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC_PER_NODE=8 swift sft \
+    --model ../textshield \
+    --template qwen2_5_vl \
+    --dataset sft_train_v2.jsonl \
+    --split_dataset_ratio 0.0001 \
+    --tuner_type lora \
+    --torch_dtype bfloat16 \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 4 \
+    --learning_rate 2e-4 \
+    --lora_rank 32 \
+    --lora_alpha 64 \
+    --target_modules all-linear \
+    --freeze_vit False \
+    --freeze_aligner False \
+    --max_length 4096 \
+    --output_dir output_sft \
+    --deepspeed zero2
+
+
+  # 5. Padding 测试图片 + 生成推理数据
+  python pad_image_dir.py --input dataset/test --output dataset/test_28
+  python pipeline.py prepare --input dataset/test_28 --image_dir dataset/test
+
+  # 6. 模型推理
+  CUDA_VISIBLE_DEVICES=0 swift infer \
+    --model ../textshield --val_dataset dataset/test_28.jsonl \
+    --max_new_tokens 4096 --model_type qwen2_5_vl --result_path inference_output.jsonl
+
+  # 7. 后处理生成提交文件
+  python pipeline.py postprocess \
+    --result inference_output.jsonl --image_dir dataset/test --output_dir output_finetuned
+
+  增强后训练集将从 1000 → 1596 样本 (Black: 800+400=1200, White: 200+196=396)，小票占比从 ~15% 提升到 ~40%。
+
+
+输出:
+- `output_finetuned/submission.csv` — 提交文件
+- `output_finetuned/masks/` — 预测 mask
+- `output_finetuned/visualizations/` — 可视化结果
+
+
+
+# 推理
+
+  推理工具用法
+
+  在项目根目录 TextShield/ 下运行：
+
+  # ── 单张图片推理 (原始模型) ──
+  python inference/infer.py --input My_Forgery_Location_Task/dataset/train/Black/receipt_10 --output_dir receipt_10_results/
+  
+  python inference/infer.py --input My_Forgery_Location_Task/dataset/train/Black/Image/000a4d9158a34f238fd06b1effcdf53e.jpg --output_dir test_01/
+
+
+
+
+  # ── 文件夹推理 (原始模型) ──
+  python inference/infer.py --input path/to/image_dir/
+
+  # ── 使用微调后的模型 ──
+  python inference/infer.py --input path/to/image_dir/ --model path/to/finetuned_model
+
+  # ── 指定输出目录和 GPU ──
+  python inference/infer.py --input path/to/image_dir/ --output_dir results/ --gpu 0
+
+  # ── 例: 用微调模型推理 ──
+  python inference/infer.py --input My_Forgery_Location_Task/dataset/test/ \
+    --model My_Forgery_Location_Task/output_sft/merged_model
+
+  输出结构
+
+  output_dir/
+  ├── raw_responses.jsonl     ← 完整保留模型所有输出 (think + answer + full response)
+  ├── submission.csv          ← 提交格式 (image_name, label, location, explanation)
+  ├── masks/                  ← 每张图的二值 mask PNG
+  └── visualizations/         ← 原图叠加红色 mask + 绿色 bbox 框
+
+  raw_responses.jsonl 每行包含：
+  - response_full — 模型完整原始输出
+  - think — <think> 中的推理过程
+  - answer — <answer> 中的结论
+  - label / bboxes / explanation / rle — 解析后的结构化结果
+
+  整个流程是端到端的：自动 pad 图片到 28 倍数 → 调用模型推理 → 解析结果 → 生成 mask/可视化/submission，不需要额外步骤。
